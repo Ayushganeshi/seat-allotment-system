@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Exam Seating Arrangement System</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    margin: 0;
+    background: linear-gradient(135deg,#1e3c72,#2a5298);
+}
+
+header {
+    background: #0d1b2a;
+    color: white;
+    padding: 20px;
+    text-align: center;
+    font-size: 24px;
+    letter-spacing: 1px;
+}
+
+.container {
+    width: 90%;
+    margin: auto;
+    padding: 20px;
+}
+
+.card {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 25px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+}
+
+h2 {
+    margin-top: 0;
+    color: #1e3c72;
+}
+
+input, textarea {
+    width: 100%;
+    padding: 8px;
+    margin: 8px 0;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+}
+
+textarea {
+    height: 100px;
+}
+
+button {
+    background: #2a5298;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+button:hover {
+    background: #1e3c72;
+}
+
+/* ===== ROOM PRINT SECTION ===== */
+
+.roomPage {
+    background: white;
+    padding: 25px;
+    margin-bottom: 40px;
+    page-break-after: always;
+}
+
+.roomHeader {
+    text-align: center;
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 15px;
+}
+
+.board {
+    background: #333;
+    color: white;
+    text-align: center;
+    padding: 8px;
+    margin-bottom: 20px;
+    border-radius: 5px;
+}
+
+.seatGrid {
+    display: grid;
+    gap: 8px;
+    justify-content: center;
+}
+
+.seat {
+    border: 1px solid #444;
+    padding: 6px;
+    font-size: 11px;
+    text-align: center;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.emptySeat {
+    background: #e9ecef;
+}
+
+/* PRINT MODE */
+@media print {
+    header, .card, button {
+        display: none;
+    }
+
+    body {
+        background: white;
+    }
+
+    .roomPage {
+        page-break-after: always;
+    }
+}
+
+</style>
+</head>
+
+<body>
+
+<header>
+Examination Seating Arrangement System
+</header>
+
+<div class="container">
+
+<div class="card">
+<h2>Upload Student Excel</h2>
+<input type="file" id="excelUpload">
+</div>
+
+<div class="card">
+<h2>Exam Details</h2>
+<input type="text" id="examName" placeholder="Exam Name">
+<input type="text" id="subject" placeholder="Subject">
+<input type="date" id="date">
+<input type="text" id="time" placeholder="Time">
+</div>
+
+<div class="card">
+<h2>Room Details (RoomNo Capacity Columns)</h2>
+<textarea id="rooms" placeholder="A101 60 6
+A102 40 5"></textarea>
+<button onclick="generateSeating()">Generate Seating</button>
+</div>
+
+<div id="output"></div>
+
+</div>
+
+<script>
+
+let students = [];
+
+/* ===== EXCEL UPLOAD ===== */
+document.getElementById("excelUpload").addEventListener("change", function(event){
+
+    let file = event.target.files[0];
+    if(!file) return;
+
+    let reader = new FileReader();
+
+    reader.onload = function(e){
+
+        let data = new Uint8Array(e.target.result);
+        let workbook = XLSX.read(data,{type:'array'});
+
+        let sheet = workbook.Sheets[workbook.SheetNames[0]];
+        let jsonData = XLSX.utils.sheet_to_json(sheet);
+
+        students = [];
+
+        jsonData.forEach(row=>{
+            students.push({
+                reg: row.RegNo || row.REGNO,
+                branch: row.Branch || row.BRANCH
+            });
+        });
+
+        alert("Excel Loaded: "+students.length+" students");
+    };
+
+    reader.readAsArrayBuffer(file);
+});
+
+
+/* ===== BRANCH MAP ===== */
+
+function buildBranchMap(list){
+    let map = {};
+    list.forEach(s=>{
+        if(!map[s.branch]) map[s.branch]=[];
+        map[s.branch].push(s);
+    });
+    return map;
+}
+
+function getNext(branchMap,lastBranch){
+
+    let branches = Object.keys(branchMap)
+        .filter(b=>branchMap[b].length>0)
+        .sort((a,b)=>branchMap[b].length-branchMap[a].length);
+
+    for(let b of branches){
+        if(b!==lastBranch){
+            return branchMap[b].shift();
+        }
+    }
+
+    if(branches.length>0){
+        return branchMap[branches[0]].shift();
+    }
+
+    return null;
+}
+
+
+/* ===== GENERATE ===== */
+
+function generateSeating(){
+
+    if(students.length===0){
+        alert("Upload Excel first");
+        return;
+    }
+
+    let roomLines=document.getElementById("rooms").value.trim().split("\n");
+    let rooms=[];
+
+    roomLines.forEach(line=>{
+        let p=line.trim().split(/\s+/);
+        if(p.length>=2){
+            rooms.push({
+                roomNo:p[0],
+                capacity:parseInt(p[1]),
+                columns:p.length>=3?parseInt(p[2]):5,
+                seats:[]
+            });
+        }
+    });
+
+    let totalCap=rooms.reduce((a,b)=>a+b.capacity,0);
+    if(students.length>totalCap){
+        alert("Not enough room capacity!");
+        return;
+    }
+
+    let branchMap=buildBranchMap(students);
+
+    rooms.forEach(room=>{
+        let last=null;
+        let colCount=0;
+
+        for(let i=0;i<room.capacity;i++){
+
+            let s=getNext(branchMap,last);
+            if(!s) break;
+
+            room.seats.push(s);
+
+            last=s.branch;
+            colCount++;
+
+            if(colCount>=room.columns){
+                colCount=0;
+                last=null;
+            }
+        }
+    });
+
+    /* ===== DISPLAY ===== */
+
+    let output="";
+
+    rooms.forEach(room=>{
+
+        output+="<div class='roomPage'>";
+
+        output+="<div class='roomHeader'>";
+        output+="Room: "+room.roomNo+
+        " | Capacity: "+room.capacity+
+        " | Columns: "+room.columns+
+        "</div>";
+
+        output+="<div class='board'>Front - Teacher Desk</div>";
+
+        output+="<div class='seatGrid' style='grid-template-columns: repeat("+room.columns+", 100px);'>";
+
+        for(let i=0;i<room.capacity;i++){
+
+            if(i<room.seats.length){
+                output+="<div class='seat'>"+
+                room.seats[i].reg+"<br>"+
+                room.seats[i].branch+
+                "</div>";
+            }else{
+                output+="<div class='seat emptySeat'>Empty</div>";
+            }
+        }
+
+        output+="</div></div>";
+    });
+
+    document.getElementById("output").innerHTML=output;
+}
+
+</script>
+
+</body>
+</html>
